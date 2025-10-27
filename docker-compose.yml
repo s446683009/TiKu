@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    container_name: question-bank-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: QuestionBankDB
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: your_secure_password_here
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - question-bank-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 后端 API
+  backend:
+    build:
+      context: ./QuestionBankAPI
+      dockerfile: Dockerfile
+    container_name: question-bank-api
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=QuestionBankDB;Username=postgres;Password=your_secure_password_here
+      - JwtSettings__SecretKey=your_jwt_secret_key_at_least_32_characters_long_for_security
+      - JwtSettings__Issuer=QuestionBankAPI
+      - JwtSettings__Audience=QuestionBankClient
+      - JwtSettings__ExpirationMinutes=1440
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - question-bank-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 前端应用
+  frontend:
+    build:
+      context: ./question-bank-admin
+      dockerfile: Dockerfile
+    container_name: question-bank-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - question-bank-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+networks:
+  question-bank-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
